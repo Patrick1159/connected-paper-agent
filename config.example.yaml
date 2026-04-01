@@ -1,0 +1,13 @@
+agent:
+  max_rounds: 2
+  top_k: 2
+
+llm:
+  protocol: openai  # openai | anthropic
+  base_url: https://api.openai.com/v1
+  api_key: ""  # recommended: set via PAPER_AGENT_API_KEY
+  model_id: gpt-5.4
+
+paths:
+  outputs_dir: outputs
+  data_dir: data

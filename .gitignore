@@ -1,0 +1,11 @@
+.venv/
+.claude/
+__pycache__/
+*.pyc
+
+# Local runtime outputs
+data/
+outputs/
+
+# Local secrets
+config.yaml
