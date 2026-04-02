@@ -85,6 +85,8 @@ def build_agent(settings: Settings):
                 continue
 
             logger.info("[round %s] Processing paper %s", round_no, arxiv_id)
+            node_depth = node_data.get("round_added", 0)
+            allow_expansion = node_depth < settings.agent.max_rounds
 
             # --- fetch full paper + PDF ---
             try:
@@ -142,6 +144,15 @@ def build_agent(settings: Settings):
                 graph.update_node(arxiv_id, status=NodeStatus.FAILED)
                 state.skipped_refs.append(f"{arxiv_id} (summarization failed: {e})")
                 logger.error("[round %s] Summarization failed for %s: %s", round_no, arxiv_id, e)
+                continue
+
+            if not allow_expansion:
+                logger.info(
+                    "[round %s] %s is at max tracing depth (%s), analyze-only mode enabled",
+                    round_no,
+                    arxiv_id,
+                    settings.agent.max_rounds,
+                )
                 continue
 
             # --- resolve candidate references ---
@@ -266,7 +277,7 @@ def build_agent(settings: Settings):
         all_nodes = graph.all_nodes()
         logger.info("[evaluate] Evaluating best lineage across %s node(s)", len(all_nodes))
         try:
-            result = select_best_lineage(llm, all_nodes, state.root_id)
+            result = select_best_lineage(llm, all_nodes, graph.all_edges(), state.root_id)
             state.lineage_chain = result.get("chain", [state.root_id])
             state.lineage_rationale = result.get("rationale", "")
             logger.info(
@@ -314,9 +325,6 @@ def build_agent(settings: Settings):
     def should_continue(state: AgentState) -> str:
         if state.error:
             logger.warning("[route] Encountered error, switching to evaluation: %s", state.error)
-            return "evaluate"
-        if state.current_round >= settings.agent.max_rounds:
-            logger.info("[route] Reached max rounds (%s)", settings.agent.max_rounds)
             return "evaluate"
         if not state.frontier:
             logger.info("[route] Frontier empty, switching to evaluation")

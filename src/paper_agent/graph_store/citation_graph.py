@@ -71,6 +71,9 @@ class CitationGraph:
     def has_edge(self, parent_id: str, child_id: str) -> bool:
         return self._g.has_edge(parent_id, child_id)
 
+    def all_edges(self) -> List[tuple[str, str]]:
+        return list(self._g.edges())
+
     # ------------------------------------------------------------------
     # Persistence
     # ------------------------------------------------------------------
