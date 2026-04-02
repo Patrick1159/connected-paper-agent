@@ -11,6 +11,7 @@ from langgraph.graph import END, StateGraph
 from ..config.settings import Settings
 from ..evaluation.evaluator import select_best_lineage
 from ..graph_store.citation_graph import CitationGraph, NodeStatus, PaperNode
+from ..arxiv_client import configure_arxiv_access
 from ..ingestion.arxiv_fetcher import fetch_metadata, _canonicalize_arxiv_id, _normalize_arxiv_id
 from ..llm.factory import build_llm_client
 from ..parsing.pdf_parser import parse_pdf
@@ -25,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_agent(settings: Settings):
+    configure_arxiv_access(settings.arxiv)
     llm = build_llm_client(settings.llm)
     graph = CitationGraph()
 
@@ -105,14 +107,12 @@ def build_agent(settings: Settings):
             pdf_ids: list[str] = []
             try:
                 with tempfile.TemporaryDirectory() as tmpdir:
-                    pdf_path = os.path.join(tmpdir, f"{arxiv_id}.pdf")
-                    import httpx
-                    resp = httpx.get(paper.pdf_url, follow_redirects=True, timeout=60)
-                    resp.raise_for_status()
-                    with open(pdf_path, "wb") as f:
-                        f.write(resp.content)
+                    from ..ingestion.arxiv_fetcher import download_pdf
+
+                    pdf_path = download_pdf(paper, dest_dir=tmpdir)
                     parsed = parse_pdf(pdf_path)
                     pdf_ids = parsed.arxiv_ids_found
+                    raw_refs = parsed.references_raw
                 logger.info(
                     "[round %s] PDF parsed for %s, found %s arXiv reference(s)",
                     round_no,
@@ -120,6 +120,7 @@ def build_agent(settings: Settings):
                     len(pdf_ids),
                 )
             except Exception as e:
+                raw_refs = []
                 logger.warning(
                     "[round %s] PDF parsing failed for %s, continuing without references: %s",
                     round_no,
@@ -156,7 +157,7 @@ def build_agent(settings: Settings):
                 continue
 
             # --- resolve candidate references ---
-            candidate_ids = extract_candidate_ids(pdf_ids, [])
+            candidate_ids = extract_candidate_ids(llm, pdf_ids, raw_refs)
             current_canonical_id = _canonicalize_arxiv_id(arxiv_id)
             # filter current paper and duplicate versioned variants of the same paper
             new_ids = [
