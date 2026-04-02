@@ -5,8 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-import arxiv
-import httpx
+from ..arxiv_client import download_pdf_file, fetch_arxiv_paper_by_id
 
 
 @dataclass
@@ -40,18 +39,16 @@ def _canonicalize_arxiv_id(arxiv_id: str) -> str:
 
 def fetch_metadata(url_or_id: str) -> PaperMeta:
     arxiv_id = _canonicalize_arxiv_id(_normalize_arxiv_id(url_or_id))
-    client = arxiv.Client()
-    results = list(client.results(arxiv.Search(id_list=[arxiv_id])))
-    if not results:
+    result = fetch_arxiv_paper_by_id(arxiv_id)
+    if not result:
         raise ValueError(f"arXiv paper not found: {arxiv_id}")
-    r = results[0]
     return PaperMeta(
         arxiv_id=arxiv_id,
-        title=r.title,
-        authors=[a.name for a in r.authors],
-        abstract=r.summary.replace("\n", " "),
-        year=r.published.year,
-        pdf_url=r.pdf_url,
+        title=result.title,
+        authors=[a.name for a in result.authors],
+        abstract=result.summary.replace("\n", " "),
+        year=result.published.year,
+        pdf_url=result.pdf_url,
     )
 
 
@@ -61,10 +58,6 @@ def download_pdf(meta: PaperMeta, dest_dir: str = "data") -> str:
     if path.exists():
         meta.pdf_path = str(path)
         return str(path)
-    with httpx.stream("GET", meta.pdf_url, follow_redirects=True, timeout=120) as r:
-        r.raise_for_status()
-        with open(path, "wb") as f:
-            for chunk in r.iter_bytes():
-                f.write(chunk)
+    download_pdf_file(meta.pdf_url, path)
     meta.pdf_path = str(path)
     return str(path)

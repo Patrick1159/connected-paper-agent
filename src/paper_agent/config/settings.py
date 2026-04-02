@@ -29,10 +29,20 @@ class PathsConfig:
 
 
 @dataclass
+class ArxivConfig:
+    enable_rate_limit: bool = True
+    min_interval_seconds: float = 3.0
+    request_timeout_seconds: float = 120.0
+    num_retries: int = 3
+    page_size: int = 100
+
+
+@dataclass
 class Settings:
     agent: AgentConfig = field(default_factory=AgentConfig)
     llm: LLMConfig = field(default_factory=LLMConfig)
     paths: PathsConfig = field(default_factory=PathsConfig)
+    arxiv: ArxivConfig = field(default_factory=ArxivConfig)
 
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> "Settings":
@@ -49,6 +59,7 @@ class Settings:
         agent_raw = raw.get("agent", {})
         llm_raw = raw.get("llm", {})
         paths_raw = raw.get("paths", {})
+        arxiv_raw = raw.get("arxiv", {})
 
         # env var overrides api_key
         api_key = os.environ.get("PAPER_AGENT_API_KEY", llm_raw.get("api_key", ""))
@@ -67,5 +78,12 @@ class Settings:
             paths=PathsConfig(
                 outputs_dir=paths_raw.get("outputs_dir", "outputs"),
                 data_dir=paths_raw.get("data_dir", "data"),
+            ),
+            arxiv=ArxivConfig(
+                enable_rate_limit=arxiv_raw.get("enable_rate_limit", True),
+                min_interval_seconds=arxiv_raw.get("min_interval_seconds", 3.0),
+                request_timeout_seconds=arxiv_raw.get("request_timeout_seconds", 120.0),
+                num_retries=arxiv_raw.get("num_retries", 3),
+                page_size=arxiv_raw.get("page_size", 100),
             ),
         )
