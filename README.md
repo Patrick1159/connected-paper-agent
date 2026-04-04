@@ -98,6 +98,43 @@ uv run python main.py https://arxiv.org/abs/2305.10601 \
 - **报告**：`outputs/report_<arxiv_id>_<timestamp>.md`
 - **图快照**：`data/<arxiv_id>_graph.json`
 
+## Frontend UI
+
+The repository now includes a local UI under `ui/` for running a trace, watching the live graph snapshot, and reading backend process logs in one workspace.
+
+### Start the UI server
+
+```bash
+python3 dev_server.py
+```
+
+Then open `http://127.0.0.1:8000/ui/`.
+
+This server does two things:
+
+- serves the repository root so the browser can access both `ui/` and `data/`
+- exposes local API endpoints used by the `Start Search` button and the live log panel
+
+### What the UI does
+
+- starts a real backend run through `POST /api/runs`
+- launches `main.py` as a subprocess with a generated per-run config
+- polls `data/<arxiv_id>_graph.json` in read-only mode for live graph updates
+- polls `/api/runs/<run_id>/logs` for real backend stdout/stderr logs
+- keeps provider settings in browser local storage through the separate Config tab
+
+### Runtime files
+
+- graph snapshots: `data/<arxiv_id>_graph.json`
+- Markdown reports: `outputs/report_<arxiv_id>_<timestamp>.md`
+- generated run configs: `.ui_runtime/configs/`
+- captured UI/backend logs: `.ui_runtime/logs/`
+
+### Notes
+
+- the UI does not write graph JSON directly; the backend remains the only writer
+- if you only want static snapshot viewing, serving the repo root also works, but `Start Search` requires `dev_server.py`
+
 ## 报告内容
 
 生成的 Markdown 报告包含：

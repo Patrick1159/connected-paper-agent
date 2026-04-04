@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Research Literature Trace Agent</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600&family=Source+Serif+4:wght@500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <header class="site-header">
+        <div class="brand-lockup">
+          <div class="brand-mark" aria-hidden="true">
+            <span class="brand-mark__ring"></span>
+            <span class="brand-mark__core"></span>
+            <span class="brand-mark__node brand-mark__node--a"></span>
+            <span class="brand-mark__node brand-mark__node--b"></span>
+            <span class="brand-mark__node brand-mark__node--c"></span>
+          </div>
+          <div>
+            <p class="eyebrow">Research Literature Trace Agent</p>
+            <h1>Paper Agent Observatory</h1>
+          </div>
+        </div>
+        <nav class="top-nav" aria-label="Primary">
+          <button class="tab-button is-active" data-tab-target="workspace">Workspace</button>
+          <button class="tab-button" data-tab-target="config">Config</button>
+        </nav>
+      </header>
+
+      <main>
+        <section class="hero-panel">
+          <div class="hero-copyblock">
+            <p class="hero-kicker">Academic workflow console</p>
+            <h2>Trace one arXiv paper into a coherent reading lineage.</h2>
+            <p class="hero-lede">
+              A read-only observatory for the agent's graph snapshots, tuned for following method evolution rather than scanning a generic dashboard.
+            </p>
+          </div>
+          <div class="hero-aside">
+            <p class="hero-copy">
+              Paste one paper, set search depth and focus width, then monitor the citation graph and trace logs as new JSON snapshots appear in the repository.
+            </p>
+            <div class="hero-notes" aria-label="Workspace notes">
+              <span>Read-only graph sync</span>
+              <span>Live snapshot polling</span>
+              <span>Separate config surface</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="tab-panel is-active" id="workspace">
+          <section class="control-grid">
+            <article class="panel panel--form">
+              <div class="panel-heading">
+                <p class="panel-label">Trace Input</p>
+              </div>
+              <form id="trace-form" class="trace-form">
+                <label class="field">
+                  <span>arXiv Link</span>
+                  <textarea
+                    id="arxiv-url"
+                    name="arxivUrl"
+                    rows="4"
+                    placeholder="https://arxiv.org/abs/2305.10601"
+                  ></textarea>
+                </label>
+
+                <div class="field-row field-row--compact">
+                  <label class="field">
+                    <span>Max Round</span>
+                    <input id="max-rounds" name="maxRounds" type="number" min="1" max="8" value="3" />
+                  </label>
+                  <label class="field">
+                    <span>Top-K</span>
+                    <input id="top-k" name="topK" type="number" min="1" max="8" value="3" />
+                  </label>
+                </div>
+
+                <div class="cta-row">
+                  <button class="primary-button" type="submit">Start Search</button>
+                  <button class="ghost-button" type="button" id="replay-demo">Refresh Snapshot</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="panel panel--summary">
+              <div class="panel-heading">
+                <p class="panel-label">Run Summary</p>
+                <p class="panel-meta">Live session snapshot</p>
+              </div>
+              <div class="summary-metrics">
+                <div>
+                  <span class="metric-label">Current round</span>
+                  <strong id="metric-round">0 / 3</strong>
+                </div>
+                <div>
+                  <span class="metric-label">Analyzed papers</span>
+                  <strong id="metric-analyzed">0</strong>
+                </div>
+                <div>
+                  <span class="metric-label">Remaining frontier</span>
+                  <strong id="metric-frontier">0</strong>
+                </div>
+                <div>
+                  <span class="metric-label">Graph density</span>
+                  <strong id="metric-density">0 edges</strong>
+                </div>
+              </div>
+              <div class="status-card" id="status-card">
+                <span class="status-card__dot"></span>
+                <div>
+                  <p class="status-card__title">Awaiting a root paper</p>
+                  <p class="status-card__text">The observatory will render graph growth and milestones once tracing starts.</p>
+                </div>
+              </div>
+            </article>
+          </section>
+
+          <section class="workspace-grid">
+            <article class="panel panel--graph">
+              <div class="panel-heading panel-heading--spread">
+                <div>
+                  <p class="panel-label">Citation Graph Evolution</p>
+                   <p class="panel-meta">Read-only view of the current paper connection graph snapshot</p>
+                </div>
+                <div class="legend" aria-label="Graph legend">
+                  <span><i class="legend-dot legend-dot--root"></i> Root</span>
+                  <span><i class="legend-dot legend-dot--active"></i> Pending frontier</span>
+                  <span><i class="legend-dot legend-dot--done"></i> Analyzed</span>
+                  <span><i class="legend-dot legend-dot--failed"></i> Failed</span>
+                </div>
+              </div>
+
+              <div class="graph-stage">
+                <div class="graph-toolbar" aria-label="Graph controls">
+                  <span>Drag to pan</span>
+                  <span>Scroll to zoom</span>
+                  <button class="ghost-button ghost-button--small" type="button" id="reset-graph-view">Reset View</button>
+                </div>
+                <svg id="graph-canvas" viewBox="0 0 920 460" role="img" aria-label="Paper citation graph evolution"></svg>
+                <div class="graph-tooltip" id="graph-tooltip" hidden></div>
+                <div class="graph-caption">
+                  <div>
+                    <p class="graph-caption__label">Evolution note</p>
+                    <p id="graph-caption-text">Nodes bloom outward by round, so the user can read exploration breadth at a glance.</p>
+                  </div>
+                </div>
+              </div>
+            </article>
+
+            <article class="panel panel--log">
+              <div class="panel-heading panel-heading--spread">
+                <div>
+                  <p class="panel-label">Trace Log</p>
+                  <p class="panel-meta">Round milestones, throughput, and remaining work</p>
+                </div>
+                <span class="log-badge" id="log-count">0 entries</span>
+              </div>
+              <ol class="log-list" id="log-list"></ol>
+            </article>
+          </section>
+        </section>
+
+        <section class="tab-panel" id="config">
+          <section class="config-layout">
+            <article class="panel panel--config">
+              <div class="panel-heading">
+                <p class="panel-label">Model Provider Config</p>
+              </div>
+
+              <form id="config-form" class="config-form">
+                <div class="field-row">
+                  <label class="field">
+                    <span>Protocol</span>
+                    <select id="protocol" name="protocol">
+                      <option value="openai">OpenAI Compatible</option>
+                      <option value="anthropic">Anthropic</option>
+                      <option value="local">Local Service</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Model ID</span>
+                    <input id="model-id" name="modelId" type="text" placeholder="gpt-4o" />
+                  </label>
+                </div>
+
+                <label class="field">
+                  <span>Base URL</span>
+                  <input id="base-url" name="baseUrl" type="url" placeholder="https://api.openai.com/v1" />
+                </label>
+
+                <label class="field">
+                  <span>API Key</span>
+                  <input id="api-key" name="apiKey" type="password" placeholder="sk-..." />
+                </label>
+
+                <div class="field-row">
+                  <label class="field">
+                    <span>Output Directory</span>
+                    <input id="outputs-dir" name="outputsDir" type="text" placeholder="outputs" />
+                  </label>
+                  <label class="field">
+                    <span>Data Directory</span>
+                    <input id="data-dir" name="dataDir" type="text" placeholder="data" />
+                  </label>
+                </div>
+
+                <div class="field-row">
+                  <label class="field">
+                    <span>Request Timeout (s)</span>
+                    <input id="request-timeout" name="requestTimeout" type="number" min="10" value="120" />
+                  </label>
+                  <label class="field checkbox-field">
+                    <span>Enable Rate Limit</span>
+                    <input id="enable-rate-limit" name="enableRateLimit" type="checkbox" checked />
+                  </label>
+                </div>
+
+                <div class="cta-row">
+                  <button class="primary-button" type="submit">Save Local Config</button>
+                </div>
+              </form>
+            </article>
+
+            <article class="panel panel--notes">
+              <div class="panel-heading">
+                <p class="panel-label">Config Notes</p>
+                <p class="panel-meta">Design for operator clarity</p>
+              </div>
+              <ul class="note-list">
+                <li>Provider settings are isolated from the tracing workspace to keep the main flow focused.</li>
+                <li>Secrets stay masked in the UI and are stored locally for prototype use only.</li>
+                <li>The layout mirrors the repository's modular design: agent params above, provider params below a dedicated tab.</li>
+              </ul>
+            </article>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
