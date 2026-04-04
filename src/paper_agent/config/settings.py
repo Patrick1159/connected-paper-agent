@@ -32,8 +32,16 @@ class PathsConfig:
 class ArxivConfig:
     enable_rate_limit: bool = True
     min_interval_seconds: float = 3.0
+    single_connection_only: bool = True
+    cache_ttl_seconds: float = 86400.0
     request_timeout_seconds: float = 120.0
     num_retries: int = 3
+    retry_on_429: bool = True
+    retry_on_network_errors: bool = True
+    backoff_min_seconds: float = 3.0
+    backoff_max_seconds: float = 15.0
+    backoff_multiplier: float = 2.0
+    backoff_jitter_seconds: float = 0.5
     page_size: int = 100
 
 
@@ -82,8 +90,16 @@ class Settings:
             arxiv=ArxivConfig(
                 enable_rate_limit=arxiv_raw.get("enable_rate_limit", True),
                 min_interval_seconds=arxiv_raw.get("min_interval_seconds", 3.0),
+                single_connection_only=arxiv_raw.get("single_connection_only", True),
+                cache_ttl_seconds=arxiv_raw.get("cache_ttl_seconds", 86400.0),
                 request_timeout_seconds=arxiv_raw.get("request_timeout_seconds", 120.0),
                 num_retries=arxiv_raw.get("num_retries", 3),
+                retry_on_429=arxiv_raw.get("retry_on_429", True),
+                retry_on_network_errors=arxiv_raw.get("retry_on_network_errors", True),
+                backoff_min_seconds=arxiv_raw.get("backoff_min_seconds", 3.0),
+                backoff_max_seconds=arxiv_raw.get("backoff_max_seconds", 15.0),
+                backoff_multiplier=arxiv_raw.get("backoff_multiplier", 2.0),
+                backoff_jitter_seconds=arxiv_raw.get("backoff_jitter_seconds", 0.5),
                 page_size=arxiv_raw.get("page_size", 100),
             ),
         )
