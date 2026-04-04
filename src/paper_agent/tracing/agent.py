@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import tempfile
@@ -29,6 +30,58 @@ def build_agent(settings: Settings):
     configure_arxiv_access(settings.arxiv)
     llm = build_llm_client(settings.llm)
     graph = CitationGraph()
+
+    def _snapshot_status(state: AgentState) -> str:
+        if state.error:
+            return "error"
+        if state.completed_at is not None:
+            return "completed"
+        return "running"
+
+    def _snapshot_path(root_id: str) -> str:
+        os.makedirs(settings.paths.data_dir, exist_ok=True)
+        return f"{settings.paths.data_dir}/{root_id.replace('/', '_')}_graph.json"
+
+    def _persist_snapshot(state: AgentState, phase: str, detail: str = "") -> None:
+        if not state.root_id:
+            return
+
+        if not state.graph_path:
+            state.graph_path = _snapshot_path(state.root_id)
+
+        state.token_usage = llm.get_token_usage()
+
+        snapshot = graph.to_dict()
+        snapshot["meta"] = {
+            "root_id": state.root_id,
+            "status": _snapshot_status(state),
+            "phase": phase,
+            "detail": detail,
+            "current_round": state.current_round,
+            "max_rounds": settings.agent.max_rounds,
+            "frontier": list(state.frontier),
+            "frontier_size": len(state.frontier),
+            "skipped_refs": list(state.skipped_refs),
+            "lineage_chain": list(state.lineage_chain),
+            "lineage_rationale": state.lineage_rationale,
+            "report_path": state.report_path,
+            "started_at": state.started_at,
+            "completed_at": state.completed_at,
+            "elapsed_seconds": state.elapsed_seconds,
+            "updated_at": time.time(),
+            "token_usage": {
+                "prompt_tokens": state.token_usage.prompt_tokens,
+                "completion_tokens": state.token_usage.completion_tokens,
+                "total_tokens": state.token_usage.total_tokens,
+                "request_count": state.token_usage.request_count,
+                "estimated_request_count": state.token_usage.estimated_request_count,
+            },
+        }
+
+        tmp_path = f"{state.graph_path}.tmp"
+        with open(tmp_path, "w") as f:
+            json.dump(snapshot, f, indent=2)
+        os.replace(tmp_path, state.graph_path)
 
     # ------------------------------------------------------------------ #
     # Node: ingest root paper                                              #
@@ -60,7 +113,9 @@ def build_agent(settings: Settings):
             round_added=0,
         )
         graph.add_node(node)
+        state.graph_path = _snapshot_path(arxiv_id)
         state.frontier = [arxiv_id]
+        _persist_snapshot(state, "ingest_completed", f"Root paper {arxiv_id} added to graph")
         logger.info("[ingest] Root paper ready: %s | title=%s", arxiv_id, paper.title)
         return state
 
@@ -69,6 +124,7 @@ def build_agent(settings: Settings):
     # ------------------------------------------------------------------ #
     def process_round(state: AgentState) -> AgentState:
         round_no = state.current_round + 1
+        _persist_snapshot(state, "round_started", f"Starting round {round_no}")
         logger.info(
             "[round %s/%s] Starting with %s paper(s) in frontier",
             round_no,
@@ -96,11 +152,13 @@ def build_agent(settings: Settings):
             except Exception:
                 graph.update_node(arxiv_id, status=NodeStatus.FAILED)
                 state.skipped_refs.append(arxiv_id)
+                _persist_snapshot(state, "paper_failed", f"Metadata fetch failed for {arxiv_id}")
                 logger.exception("[round %s] Failed to fetch metadata for %s", round_no, arxiv_id)
                 continue
 
             # update node with fetched metadata (title/abstract may now be available)
             graph.update_node(arxiv_id, title=paper.title, abstract=paper.abstract)
+            _persist_snapshot(state, "metadata_fetched", f"Fetched metadata for {arxiv_id}")
             logger.info("[round %s] Metadata fetched for %s", round_no, arxiv_id)
 
             # --- download & parse PDF ---
@@ -140,10 +198,12 @@ def build_agent(settings: Settings):
                     problem_solved=summary.problem_solved,
                     research_field=summary.field,
                 )
+                _persist_snapshot(state, "paper_analyzed", f"Summarization completed for {arxiv_id}")
                 logger.info("[round %s] Summarization completed for %s", round_no, arxiv_id)
             except Exception as e:
                 graph.update_node(arxiv_id, status=NodeStatus.FAILED)
                 state.skipped_refs.append(f"{arxiv_id} (summarization failed: {e})")
+                _persist_snapshot(state, "paper_failed", f"Summarization failed for {arxiv_id}")
                 logger.error("[round %s] Summarization failed for %s: %s", round_no, arxiv_id, e)
                 continue
 
@@ -195,8 +255,10 @@ def build_agent(settings: Settings):
                         round_added=state.current_round + 1,
                     )
                     graph.add_node(child_node)
+                    _persist_snapshot(state, "candidate_added", f"Added candidate node {cid}")
                     logger.info("[round %s] Added candidate node %s", round_no, cid)
                 graph.add_edge(arxiv_id, cid)
+                _persist_snapshot(state, "edge_added", f"Added citation edge {arxiv_id} -> {cid}")
                 cd = graph.get_node(cid)
                 candidates_meta.append({
                     "arxiv_id": cid,
@@ -264,6 +326,7 @@ def build_agent(settings: Settings):
                 seen_frontier[fid] = None
         state.frontier = list(seen_frontier.keys())
         state.current_round += 1
+        _persist_snapshot(state, "round_completed", f"Completed round {round_no}")
         logger.info(
             "[round %s] Completed. Next frontier has %s paper(s)",
             round_no,
@@ -276,11 +339,13 @@ def build_agent(settings: Settings):
     # ------------------------------------------------------------------ #
     def evaluate(state: AgentState) -> AgentState:
         all_nodes = graph.all_nodes()
+        _persist_snapshot(state, "evaluation_started", "Selecting best lineage")
         logger.info("[evaluate] Evaluating best lineage across %s node(s)", len(all_nodes))
         try:
             result = select_best_lineage(llm, all_nodes, graph.all_edges(), state.root_id)
             state.lineage_chain = result.get("chain", [state.root_id])
             state.lineage_rationale = result.get("rationale", "")
+            _persist_snapshot(state, "evaluation_completed", "Selected lineage chain")
             logger.info(
                 "[evaluate] Selected lineage length: %s",
                 len(state.lineage_chain),
@@ -288,6 +353,7 @@ def build_agent(settings: Settings):
         except Exception as e:
             state.lineage_chain = [state.root_id]
             state.lineage_rationale = f"Evaluation failed: {e}"
+            _persist_snapshot(state, "evaluation_failed", "Lineage evaluation failed")
             logger.error("[evaluate] Lineage evaluation failed: %s", e)
         return state
 
@@ -297,6 +363,7 @@ def build_agent(settings: Settings):
     def report(state: AgentState) -> AgentState:
         state.completed_at = time.time()
         state.elapsed_seconds = state.completed_at - state.started_at
+        state.token_usage = llm.get_token_usage()
         all_nodes = graph.all_nodes()
         logger.info("[report] Rendering report for %s node(s)", len(all_nodes))
         content = render_report(
@@ -306,18 +373,14 @@ def build_agent(settings: Settings):
             nodes=all_nodes,
             skipped=state.skipped_refs,
             elapsed_seconds=state.elapsed_seconds,
+            token_usage=state.token_usage,
         )
         path = save_report(content, settings.paths.outputs_dir, state.root_id)
         state.report_path = path
         logger.info("[report] Markdown report saved to %s", path)
 
-        # Also save graph snapshot
-        import os as _os
-        snap_dir = settings.paths.data_dir
-        _os.makedirs(snap_dir, exist_ok=True)
-        graph_path = f"{snap_dir}/{state.root_id.replace('/', '_')}_graph.json"
-        graph.save(graph_path)
-        logger.info("[report] Graph snapshot saved to %s", graph_path)
+        _persist_snapshot(state, "report_completed", f"Report saved to {path}")
+        logger.info("[report] Graph snapshot saved to %s", state.graph_path)
         return state
 
     # ------------------------------------------------------------------ #

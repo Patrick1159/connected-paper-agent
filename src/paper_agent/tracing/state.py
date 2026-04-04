@@ -4,6 +4,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from ..llm.base import TokenUsage
+
 
 @dataclass
 class AgentState:
@@ -17,6 +19,8 @@ class AgentState:
     skipped_refs: List[str] = field(default_factory=list)  # titles/ids not on arXiv
     started_at: float = field(default_factory=time.time)
     completed_at: Optional[float] = None
+    graph_path: str = ""
+    token_usage: TokenUsage = field(default_factory=TokenUsage)
 
     # Output
     lineage_chain: List[str] = field(default_factory=list)

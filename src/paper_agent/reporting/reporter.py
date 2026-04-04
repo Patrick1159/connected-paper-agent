@@ -4,6 +4,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List
 
+from ..llm.base import TokenUsage
+
 
 def _format_duration(total_seconds: float) -> str:
     seconds = max(int(round(total_seconds)), 0)
@@ -26,6 +28,7 @@ def render_report(
     nodes: List[Dict[str, Any]],
     skipped: List[str],
     elapsed_seconds: float = 0.0,
+    token_usage: TokenUsage | None = None,
 ) -> str:
     node_map = {n["arxiv_id"]: n for n in nodes}
     lines: List[str] = []
@@ -37,6 +40,17 @@ def render_report(
     if root_id in node_map:
         root = node_map[root_id]
         lines.append(f"**Title:** {root.get('title', 'N/A')}")
+
+    usage = token_usage or TokenUsage()
+    lines.append("\n## Run Statistics\n")
+    lines.append(f"- LLM requests: {usage.request_count}")
+    lines.append(f"- Prompt tokens: {usage.prompt_tokens}")
+    lines.append(f"- Completion tokens: {usage.completion_tokens}")
+    lines.append(f"- Total tokens: {usage.total_tokens}")
+    if usage.estimated_request_count:
+        lines.append(
+            f"- Estimated token requests: {usage.estimated_request_count}"
+        )
 
     lines.append("\n---\n")
     lines.append("## Best Lineage Chain\n")
