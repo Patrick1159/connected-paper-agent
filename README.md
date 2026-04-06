@@ -2,6 +2,8 @@
 
 基于 LangGraph 的科研文献溯源 Agent。输入一篇 arXiv 论文链接，自动完成多轮引用溯源，输出一条最值得阅读的文献发展脉络与 Markdown 报告。
 
+> 中文为默认文档。English version starts at [`English`](#english).
+
 ## 功能概览
 
 - 自动获取 arXiv 论文元数据并下载 PDF 解析引用
@@ -51,6 +53,7 @@ uv sync
 agent:
   max_rounds: 3   # 最大迭代轮数
   top_k: 3        # 每轮深入调查的候选文献数量
+  title_shortlist_size: 8  # title 解析后先让 LLM 粗筛，再请求 arXiv
 
 llm:
   protocol: openai            # openai | openai_compatible
@@ -92,6 +95,20 @@ uv run python main.py https://arxiv.org/abs/2305.10601 \
 | `--config` | 配置文件路径 | 自动查找 config.yaml |
 | `--max-rounds` | 最大迭代轮数（覆盖 config） | config 中的值 |
 | `--top-k` | 每轮 top-k 候选数（覆盖 config） | config 中的值 |
+
+## arXiv 请求优化
+
+为降低 arXiv API 429 风险，当前版本加入了两层轻量缓存和一层 title 预筛选：
+
+- `arxiv_id -> metadata` 缓存：同一篇论文在不同路径反复出现时，避免重复请求 metadata
+- `title -> arxiv_id | None` 缓存：相同 title 不再重复做 arXiv title search，失败结果也会缓存
+- `title_shortlist_size`：先让 LLM 仅根据 title 名称粗筛最相关的前 $N$ 个 title，再访问 arXiv 做解析
+
+建议：
+
+- 若出现 arXiv 429，可先减小 `title_shortlist_size`
+- 若你更看重召回率，可适当调大 `title_shortlist_size`
+- `title_shortlist_size <= 0` 时会跳过 shortlist
 
 ### 4. 查看输出
 
@@ -195,3 +212,76 @@ llm:
 - [pypdf](https://github.com/py-pdf/pypdf) — PDF 解析
 - [networkx](https://networkx.org/) — 引用图结构
 - [httpx](https://www.python-httpx.org/) — HTTP 客户端
+
+## English
+
+Research Literature Trace Agent built on LangGraph. Given one arXiv paper URL, it performs multi-round citation tracing and outputs a recommended reading lineage plus a Markdown report.
+
+### Features
+
+- Fetches arXiv metadata automatically and downloads PDFs for reference parsing
+- Multi-round tracing with configurable depth `m` and per-round top-k expansion
+- Uses an LLM to summarize each paper's core idea, method, and target problem
+- Builds a reusable citation graph with `networkx`
+- Selects one best literature-development chain with an LLM evaluator
+- Exports both a Markdown report and a JSON graph snapshot
+
+### Quick start
+
+#### 1. Install dependencies
+
+```bash
+uv sync
+```
+
+#### 2. Configure the LLM
+
+Copy `config.example.yaml` to `config.yaml` and fill in your provider settings:
+
+```yaml
+agent:
+  max_rounds: 3
+  top_k: 3
+  title_shortlist_size: 8
+
+llm:
+  protocol: openai
+  base_url: https://api.openai.com/v1
+  api_key: ""
+  model_id: gpt-4o
+
+paths:
+  outputs_dir: outputs
+  data_dir: data
+```
+
+Recommended API key setup:
+
+```bash
+export PAPER_AGENT_API_KEY=sk-xxxxxxxxxxxx
+```
+
+#### 3. Run
+
+```bash
+uv run python main.py https://arxiv.org/abs/2305.10601
+```
+
+Optional arguments:
+
+```bash
+uv run python main.py https://arxiv.org/abs/2305.10601 \
+  --config config.yaml \
+  --max-rounds 2 \
+  --top-k 2
+```
+
+### arXiv request reduction
+
+This repository now includes three mechanisms to reduce redundant or low-value arXiv API calls:
+
+- `arxiv_id -> metadata` cache to avoid repeated metadata fetches for the same paper
+- `title -> arxiv_id | None` cache to avoid repeated title searches, including negative results
+- `agent.title_shortlist_size` to let the LLM shortlist the most relevant titles before arXiv resolution
+
+If you encounter rate limits, lower `title_shortlist_size` first. If you want higher recall, increase it carefully.

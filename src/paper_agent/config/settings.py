@@ -20,6 +20,7 @@ class LLMConfig:
 class AgentConfig:
     max_rounds: int = 3
     top_k: int = 3
+    title_shortlist_size: int = 8
 
 
 @dataclass
@@ -76,6 +77,7 @@ class Settings:
             agent=AgentConfig(
                 max_rounds=agent_raw.get("max_rounds", 3),
                 top_k=agent_raw.get("top_k", 3),
+                title_shortlist_size=agent_raw.get("title_shortlist_size", 8),
             ),
             llm=LLMConfig(
                 protocol=llm_raw.get("protocol", "openai"),

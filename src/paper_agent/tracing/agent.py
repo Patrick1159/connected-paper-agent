@@ -217,7 +217,13 @@ def build_agent(settings: Settings):
                 continue
 
             # --- resolve candidate references ---
-            candidate_ids = extract_candidate_ids(llm, pdf_ids, raw_refs)
+            candidate_ids = extract_candidate_ids(
+                llm,
+                node_data["title"],
+                pdf_ids,
+                raw_refs,
+                title_shortlist_size=settings.agent.title_shortlist_size,
+            )
             current_canonical_id = _canonicalize_arxiv_id(arxiv_id)
             # filter current paper and duplicate versioned variants of the same paper
             new_ids = [
