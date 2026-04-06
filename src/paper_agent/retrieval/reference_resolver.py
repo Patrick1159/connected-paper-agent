@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+from threading import Lock
 from typing import Iterable, List, Optional
 
 from ..arxiv_client import extract_arxiv_id_from_entry, search_arxiv_by_title
@@ -11,6 +12,10 @@ from ..llm.base import LLMClient, Message
 
 
 logger = logging.getLogger(__name__)
+
+
+_title_resolution_cache: dict[str, Optional[str]] = {}
+_title_resolution_cache_lock = Lock()
 
 
 _QUOTED_TITLE_RE = re.compile(r'["“](.+?)["”]')
@@ -40,6 +45,21 @@ Rules:
 - `title` must be only the paper title, without authors, venue, year, pages, DOI, or arXiv ID.
 - If the title cannot be identified reliably, use null.
 - Prefer precision over recall.
+- No markdown, no extra text."""
+
+_TITLE_PREFILTER_SYSTEM = """You rank paper titles by likely relevance to a source paper.
+
+Return valid JSON only as an array of objects:
+[
+    {"title": "<exact title>", "reason": "<short reason>"}
+]
+
+Rules:
+- Choose at most the requested number of titles.
+- Use only titles from the provided candidate list.
+- Keep each `title` exactly unchanged from the input list.
+- Prefer titles that look most related to the source paper's problem or method.
+- If uncertain, return fewer titles instead of guessing.
 - No markdown, no extra text."""
 
 _DEFAULT_TITLE_PARSE_BATCH_SIZE = 12
@@ -164,6 +184,10 @@ def _is_plausible_title(title: str) -> bool:
     return True
 
 
+def _normalize_title_cache_key(title: str) -> str:
+    return re.sub(r"\s+", " ", title).strip(" .;,").casefold()
+
+
 def extract_title_from_reference(reference: str) -> Optional[str]:
     """Best-effort extraction of a paper title from a raw reference block."""
     best_title: Optional[str] = None
@@ -226,13 +250,89 @@ def _parse_titles_with_llm(
     return titles
 
 
+def _shortlist_titles_with_llm(
+    llm: LLMClient,
+    source_title: str,
+    candidate_titles: List[str],
+    shortlist_size: Optional[int],
+) -> List[str]:
+    if shortlist_size is None or shortlist_size <= 0:
+        return []
+    if len(candidate_titles) <= shortlist_size:
+        return list(candidate_titles)
+
+    payload = {
+        "source_title": source_title,
+        "max_titles": shortlist_size,
+        "candidate_titles": candidate_titles,
+    }
+
+    try:
+        reply = llm.chat(
+            [
+                Message("system", _TITLE_PREFILTER_SYSTEM),
+                Message("user", json.dumps(payload, ensure_ascii=False)),
+            ],
+            temperature=0,
+        )
+        data = json.loads(_strip_code_fences(reply))
+        if not isinstance(data, list):
+            raise ValueError("Title shortlist reply must be a JSON array.")
+
+        candidate_lookup = {_normalize_title_cache_key(title): title for title in candidate_titles}
+        shortlisted: List[str] = []
+        seen: dict[str, None] = {}
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            title = item.get("title")
+            if not isinstance(title, str):
+                continue
+            normalized = _normalize_title_cache_key(title)
+            exact_title = candidate_lookup.get(normalized)
+            if exact_title and normalized not in seen:
+                seen[normalized] = None
+                shortlisted.append(exact_title)
+            if len(shortlisted) >= shortlist_size:
+                break
+
+        if shortlisted:
+            logger.info(
+                "[refs] LLM shortlisted %s/%s parsed titles before arXiv resolution",
+                len(shortlisted),
+                len(candidate_titles),
+            )
+            return shortlisted
+    except Exception as exc:
+        logger.warning("[refs] LLM title shortlist failed: %s", exc)
+
+    fallback_titles = list(candidate_titles[:shortlist_size])
+    logger.info(
+        "[refs] Falling back to first %s/%s parsed titles before arXiv resolution",
+        len(fallback_titles),
+        len(candidate_titles),
+    )
+    return fallback_titles
+
+
 def resolve_arxiv_id_by_title(title: str) -> Optional[str]:
     """Best-effort: search arXiv by title, return ID of top result."""
+    cache_key = _normalize_title_cache_key(title)
+    with _title_resolution_cache_lock:
+        if cache_key in _title_resolution_cache:
+            return _title_resolution_cache[cache_key]
+
     try:
         results = search_arxiv_by_title(title, max_results=1)
         if not results:
+            with _title_resolution_cache_lock:
+                _title_resolution_cache[cache_key] = None
             return None
-        return extract_arxiv_id_from_entry(results[0].entry_id)
+        arxiv_id = extract_arxiv_id_from_entry(results[0].entry_id)
+        canonical_arxiv_id = _canonicalize_arxiv_id(arxiv_id) if arxiv_id else None
+        with _title_resolution_cache_lock:
+            _title_resolution_cache[cache_key] = canonical_arxiv_id
+        return canonical_arxiv_id
     except Exception as exc:
         logger.warning("[refs] arXiv title search failed for %r: %s", title, exc)
         return None
@@ -267,10 +367,12 @@ def _resolve_titles_in_batches(
 
 def extract_candidate_ids(
     llm: LLMClient,
+    source_title: str,
     arxiv_ids_from_pdf: List[str],
     references_raw: List[str],
     llm_suggested_titles: Optional[List[str]] = None,
     max_title_resolutions: Optional[int] = None,
+    title_shortlist_size: Optional[int] = None,
     title_parse_batch_size: int = _DEFAULT_TITLE_PARSE_BATCH_SIZE,
     title_query_batch_size: int = _DEFAULT_TITLE_QUERY_BATCH_SIZE,
 ) -> List[str]:
@@ -286,6 +388,12 @@ def extract_candidate_ids(
         llm,
         references_raw,
         batch_size=title_parse_batch_size,
+    )
+    titles_to_resolve = _shortlist_titles_with_llm(
+        llm,
+        source_title,
+        titles_to_resolve,
+        title_shortlist_size,
     )
     resolved_ids = _resolve_titles_in_batches(
         titles_to_resolve,

@@ -3,9 +3,14 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from threading import Lock
 from typing import Optional
 
 from ..arxiv_client import download_pdf_file, fetch_arxiv_paper_by_id
+
+
+_metadata_cache: dict[str, "PaperMeta"] = {}
+_metadata_cache_lock = Lock()
 
 
 @dataclass
@@ -39,10 +44,24 @@ def _canonicalize_arxiv_id(arxiv_id: str) -> str:
 
 def fetch_metadata(url_or_id: str) -> PaperMeta:
     arxiv_id = _canonicalize_arxiv_id(_normalize_arxiv_id(url_or_id))
+
+    with _metadata_cache_lock:
+        cached = _metadata_cache.get(arxiv_id)
+    if cached is not None:
+        return PaperMeta(
+            arxiv_id=cached.arxiv_id,
+            title=cached.title,
+            authors=list(cached.authors),
+            abstract=cached.abstract,
+            year=cached.year,
+            pdf_url=cached.pdf_url,
+            pdf_path=cached.pdf_path,
+        )
+
     result = fetch_arxiv_paper_by_id(arxiv_id)
     if not result:
         raise ValueError(f"arXiv paper not found: {arxiv_id}")
-    return PaperMeta(
+    meta = PaperMeta(
         arxiv_id=arxiv_id,
         title=result.title,
         authors=[a.name for a in result.authors],
@@ -50,6 +69,17 @@ def fetch_metadata(url_or_id: str) -> PaperMeta:
         year=result.published.year,
         pdf_url=result.pdf_url,
     )
+    with _metadata_cache_lock:
+        _metadata_cache[arxiv_id] = PaperMeta(
+            arxiv_id=meta.arxiv_id,
+            title=meta.title,
+            authors=list(meta.authors),
+            abstract=meta.abstract,
+            year=meta.year,
+            pdf_url=meta.pdf_url,
+            pdf_path=meta.pdf_path,
+        )
+    return meta
 
 
 def download_pdf(meta: PaperMeta, dest_dir: str = "data") -> str:
